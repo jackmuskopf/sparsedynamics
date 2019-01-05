@@ -1,7 +1,9 @@
 import os
 import matplotlib
+matplotlib.use('TkAgg')
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 import numpy as np
 from sklearn.cluster import KMeans
 
@@ -27,7 +29,7 @@ def pca_kmeans_segmentation(pet_img, **kwargs):  # nclusters=10, nfeatures=None,
 	keys = kwargs.keys()
 
 	# specify limits of region to segment
-	if 'roi_lims' in keys:
+	if 'roi_lims' in keys and kwargs['roi_lims'] is not None:
 		(zmin,zmax),(ymin,ymax),(xmin,xmax) = kwargs['roi_lims']
 		roi = roi[zmin:zmax,ymin:ymax,xmin:xmax,:]
 		zd,yd,xd,td = roi.shape
@@ -48,7 +50,7 @@ def pca_kmeans_segmentation(pet_img, **kwargs):  # nclusters=10, nfeatures=None,
 	X = roi.reshape(N,td)
 
 	# normalize each voxel over time
-	X = np.apply_along_axis(lambda x: x/np.linalg.norm(x,ord=2), 0, X)
+	# X = np.apply_along_axis(lambda x: x/np.linalg.norm(x,ord=2), 0, X)
 
 	# SVD of data matrix
 	U, S, Vh = np.linalg.svd(X.T.dot(X))
@@ -105,15 +107,17 @@ def plot_masks(roi, masks, **kwargs):
 	time_ax = 3
 
 	# setup axes for plots
+	nc = 6
 	fig = plt.figure()
 	axes = []
 	nplots = len(masks)+1
 	for k in range(nplots):
-	    ax = fig.add_subplot(1+nplots//3,3,k+1)
+	    ax = fig.add_subplot(1+nplots//nc,nc,k+1)
+	    ax.set_aspect('auto')
 	    axes.append(ax)
 
 	# figures size
-	plt.rcParams["figure.figsize"] = fig_size
+	# plt.rcParams["figure.figsize"] = fig_size
 	
 	# plot original image
 	roi_image = normalize(spatial_collapse(time_collapse(roi,axis=time_ax),axis=view_ax))
@@ -122,25 +126,97 @@ def plot_masks(roi, masks, **kwargs):
 	# plot each mask
 	for ax,premask in zip(axes[1:],masks):	
 	    fmask = np.apply_along_axis(mask_collapse,view_ax,premask)
-	    ax.imshow(fmask)
+	    ax.imshow(fmask, cmap='gray')
 	plt.tight_layout()
 	plt.show()
 
 
+def apply_masks(masks,roi):
+	new_rois = []
+	for m in masks:
+		nroi = np.stack([np.multiply(roi[:,:,:,k],m) for k in range(roi.shape[-1])],axis=-1)
+		new_rois.append(nroi)
+	return new_rois
 
 
+def animate_frames(frames,**kwargs):
+
+	fig = plt.figure()
+	ims = [[plt.imshow(frame, cmap="gray", animated=True)] for frame in frames]
+	ani = animation.ArtistAnimation(fig, ims, interval=100, blit=True)
+	plt.show()
+
+def logger(s):
+	if DEBUG:
+		print(s)
 
 if __name__ == '__main__':
-	filepath = os.path.join("single_mouse_pet",
-							"mpet3715b_em1_v1.pet.img")
-							# "mpet3721a_em1_v1_s4.pet.img")
 
-	img = PETImage(filepath=filepath)
-	img.load_image()
-	Ns = img.img_data.shape
-	Ws = (60,40,40)
-	roi_lims = [(int((N-W)/2),int((N+W)/2)) for N,W in zip(Ns,Ws)]
+	DEBUG = False
 
-	pca_kmeans_segmentation(img,roi_lims=roi_lims,nfeatures=20,nclusters=10)
+	# iterate over image files in directory
+	for fname in os.listdir('single_mouse_pet'):
 
-	img.unload_image()
+		try:
+
+			if fname.endswith('.pet.img') and not fname.startswith('.'):
+
+				filepath = os.path.join("single_mouse_pet",fname)
+
+				# load image
+				img = PETImage(filepath=filepath)
+				img.load_image()
+				Ns = img.img_data.shape
+
+				# select the middle z=Ws[0],y=Ws[1],x=Ws[2] prism of each frame; y axis might need to be wider
+				Ws = (128,60,40)
+				roi_lims = [(int((N-W)/2),int((N+W)/2)) for N,W in zip(Ns,Ws)]
+
+				# select options for segmentation and run segmentation
+				print('Clustering image voxels...')
+				options = {
+					'roi_lims' : roi_lims,
+					'plot' : True,
+					'nfeatures' : 6,
+					'nclusters' : 20
+					}
+				masks, roi = pca_kmeans_segmentation(img,**options)
+
+				# done with original image data
+				img.unload_image()
+
+				# apply mask to roi
+				new_rois = apply_masks(masks,roi)
+
+				# animate new ROIs
+				collapse_method = 'sum'	# use sum or max
+				view_ax = 'y'
+				with_roi = True		# whether to show original roi next to animated mask
+				wroi_map = {
+					2 : 0,	# x->y
+					0 : 1,	# z->x
+					1 : 1	# y->x
+				}
+
+				# # animate each segment
+				# view_ax = img.get_axis(view_ax)
+				# for nroi in new_rois:
+				# 	nroi = normalize(getattr(nroi,collapse_method)(axis=view_ax))
+				# 	if with_roi:
+				# 		wroi_ax = wroi_map[view_ax]
+				# 		roi_frames  = normalize(getattr(roi,collapse_method)(axis=view_ax))
+				# 		nroi = np.concatenate([nroi,roi_frames],axis=wroi_ax)
+				# 	frames = np.split(nroi, nroi.shape[-1], axis=-1)
+				# 	frames = [np.squeeze(f) for f in frames]
+				# 	animate_frames(frames)
+
+		except KeyboardInterrupt:
+			plt.close()
+			cont = input('\nContinue to next image?\nEnter empty string to continue; enter any other string to stop.')
+			if cont != '':
+				break
+
+
+
+
+

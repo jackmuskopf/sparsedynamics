@@ -573,7 +573,7 @@ class BaseImage:
         mats = [np.squeeze(m) for m in mats]
         return mats
 
-    def animate_matrix(self,matrix=None,axis='y',method='sequential',scale=5.0,interval=10):
+    def animate_matrix(self,matrix=None,axis='y',method='max',scale=5.0,interval=10):
         if method not in ['sequential','max','sum']:
             raise ValueError('Bad method in animate_matrix: {}'.format(method))
 
