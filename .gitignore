@@ -1,2 +1,9 @@
 .DS_Store
+.idea/
+temp/
+*.pyc
+*~
+*.img
+*.img.hdr
+python_implementation/.ipynb_checkpoints/
 pet_experiments/single_mouse_pet
